@@ -17,20 +17,22 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Check for required environment variables
-required_env_vars = ['GOOGLE_API_KEY', 'OPENAI_API_KEY']
-missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
-if missing_vars:
-    logger.warning(f"Missing environment variables: {', '.join(missing_vars)}")
-    logger.warning("Some functionality may not work correctly without these variables.")
+# OPENAI_API_KEY is optional if using Azure embeddings or Ollama
+google_key_missing = not os.environ.get('GOOGLE_API_KEY')
+openai_key_missing = not os.environ.get('OPENAI_API_KEY')
 
-# Configure Google Generative AI
-import google.generativeai as genai
-from api.config import GOOGLE_API_KEY
+if google_key_missing:
+    logger.warning("Missing environment variable: GOOGLE_API_KEY. Google Gemini models will be unavailable.")
 
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-else:
-    logger.warning("GOOGLE_API_KEY not configured")
+if openai_key_missing:
+    # Only warn if neither Azure nor Ollama embedder appears configured
+    azure_endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT') or os.environ.get('API_BASE')
+    azure_version = os.environ.get('AZURE_OPENAI_VERSION') or os.environ.get('EMBEDDING_API_VERSION')
+    azure_key = os.environ.get('AZURE_OPENAI_API_KEY')
+    ollama_host = os.environ.get('OLLAMA_HOST')
+    if not (azure_endpoint and azure_version and (azure_key or ollama_host)):
+        logger.warning("OPENAI_API_KEY not set. If you are not using Azure or Ollama for embeddings, set OPENAI_API_KEY.")
+
 
 if __name__ == "__main__":
     # Get port from environment variable or use default

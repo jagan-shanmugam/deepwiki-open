@@ -1,10 +1,13 @@
 {
   "embedder": {
-    "client_class": "OpenAIClient",
+    "client_class": "AzureAIClient",
     "batch_size": 500,
+    "initialize_kwargs": {
+      "api_version": "${AZURE_OPENAI_EMBEDDING_API_VERSION}",
+      "azure_endpoint": "${AZURE_OPENAI_ENDPOINT}"
+    },
     "model_kwargs": {
-      "model": "text-embedding-3-small",
-      "dimensions": 256,
+      "model": "${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}",
       "encoding_format": "float"
     }
   },

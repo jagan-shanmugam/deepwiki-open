@@ -312,7 +312,7 @@ docker-compose up
 | Variable             | Description                                                  | Required | Note                                                                                                     |
 |----------------------|--------------------------------------------------------------|----------|----------------------------------------------------------------------------------------------------------|
 | `GOOGLE_API_KEY`     | Google Gemini API key for AI generation                      | No | Required only if you want to use Google Gemini models                                                    
-| `OPENAI_API_KEY`     | OpenAI API key for embeddings                                | Yes | Note: This is required even if you're not using OpenAI models, as it's used for embeddings.              |
+| `OPENAI_API_KEY`     | OpenAI API key for embeddings                                | No | Required unless you use Azure or Ollama for embeddings.                                                  |
 | `OPENROUTER_API_KEY` | OpenRouter API key for alternative models                    | No | Required only if you want to use OpenRouter models                                                       |
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key                    | No | Required only if you want to use Azure OpenAI models                                                       |
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint                    | No | Required only if you want to use Azure OpenAI models                                                       |
@@ -323,7 +323,7 @@ docker-compose up
 | `DEEPWIKI_AUTH_MODE` | Set to `true` or `1` to enable authorization mode. | No | Defaults to `false`. If enabled, `DEEPWIKI_AUTH_CODE` is required. |
 | `DEEPWIKI_AUTH_CODE` | The secret code required for wiki generation when `DEEPWIKI_AUTH_MODE` is enabled. | No | Only used if `DEEPWIKI_AUTH_MODE` is `true` or `1`. |
 
-If you're not using ollama mode, you need to configure an OpenAI API key for embeddings. Other API keys are only required when configuring and using models from the corresponding providers.
+If you're not using Azure or Ollama for embeddings, configure an OpenAI API key. Other API keys are only required when configuring and using models from the corresponding providers.
 
 ## Authorization Mode
 

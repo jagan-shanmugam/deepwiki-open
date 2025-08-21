@@ -26,7 +26,12 @@ Create a `.env` file in the project root:
 ```
 # Required API Keys
 GOOGLE_API_KEY=your_google_api_key        # Required for Google Gemini models
-OPENAI_API_KEY=your_openai_api_key        # Required for embeddings and OpenAI models
+# If you are using OpenAI embeddings:
+OPENAI_API_KEY=your_openai_api_key
+# If you are using Azure embeddings:
+AZURE_OPENAI_API_KEY=your_azure_openai_api_key
+AZURE_OPENAI_ENDPOINT=your_azure_openai_endpoint
+AZURE_OPENAI_VERSION=your_azure_openai_version
 
 # Optional API Keys
 OPENROUTER_API_KEY=your_openrouter_api_key  # Required only if using OpenRouter models
@@ -62,12 +67,13 @@ DeepWiki supports multiple LLM providers. The environment variables above are re
 
 - **Google Gemini**: Requires `GOOGLE_API_KEY`
 - **OpenAI**: Requires `OPENAI_API_KEY`
+- **Azure OpenAI**: Requires `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_VERSION`
 - **OpenRouter**: Requires `OPENROUTER_API_KEY`
 - **AWS Bedrock**: Requires `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
 - **Ollama**: No API key required (runs locally)
 
-##### Custom OpenAI API Endpoints
-The `OPENAI_BASE_URL` variable allows you to specify a custom endpoint for the OpenAI API. This is useful for:
+##### Custom OpenAI/Azure-Compatible API Endpoints
+The `OPENAI_BASE_URL` (for OpenAI client) or `AZURE_OPENAI_ENDPOINT` (for Azure client) variables allow you to specify a custom endpoint. This is useful for:
 
 - Enterprise users with private API channels
 - Organizations using self-hosted or custom-deployed LLM services
