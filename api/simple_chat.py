@@ -434,11 +434,15 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                 model_type=ModelType.LLM
             )
         else:
+            client = genai.Client(
+                http_options=HttpOptions(base_url=os.getenv("GOOGLE_API_BASE_URL"), api_version='v1'),
+                api_key=os.getenv("GOOGLE_API_KEY")
+            )
             # Initialize Google Generative AI model
-            model = genai.GenerativeModel(
-                http_options=HttpOptions(base_url=os.getenv("GOOGLE_API_BASE_URL")),
-                model_name=model_config["model"],
-                generation_config={
+            model = client.models.generate_content(
+                model=model_config["model"],
+                contents=prompt,
+                config={
                     "temperature": model_config["temperature"],
                     "top_p": model_config["top_p"],
                     "top_k": model_config["top_k"]
@@ -517,8 +521,18 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                         logger.error(f"Error with Azure AI API: {str(e_azure)}")
                         yield f"\nError with Azure AI API: {str(e_azure)}\n\nPlease check that you have set the AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, and AZURE_OPENAI_VERSION environment variables with valid values."
                 else:
+                    client = genai.Client(
+                        http_options=HttpOptions(base_url=os.getenv("GOOGLE_API_BASE_URL"), api_version='v1'),
+                        api_key=os.getenv("GOOGLE_API_KEY")
+                    )
                     # Generate streaming response
-                    response = model.generate_content(prompt, stream=True)
+                    response = client.models.generate_content_stream(model=model_config["model"], 
+                                                                     contents=prompt, 
+                                                                     config={
+                        "temperature": model_config["temperature"],
+                        "top_p": model_config["top_p"],
+                        "top_k": model_config["top_k"]
+                    })
                     # Stream the response
                     for chunk in response:
                         if hasattr(chunk, 'text'):
@@ -654,19 +668,18 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                             # Initialize Google Generative AI model
                             model_config = get_model_config(request.provider, request.model)
                             google_base_url = os.getenv("GOOGLE_API_BASE_URL")
-                            
-                            fallback_model = genai.GenerativeModel(
-                                http_options=HttpOptions(base_url=google_base_url) if google_base_url else None,
-                                model_name=model_config["model"],
-                                generation_config={
-                                    "temperature": model_config["model_kwargs"].get("temperature", 0.7),
-                                    "top_p": model_config["model_kwargs"].get("top_p", 0.8),
-                                    "top_k": model_config["model_kwargs"].get("top_k", 40)
-                                }
+                            client = genai.Client(
+                                http_options=HttpOptions(base_url=google_base_url, api_version='v1'),
+                                api_key=os.getenv("GOOGLE_API_KEY")
                             )
 
                             # Get streaming response using simplified prompt
-                            fallback_response = fallback_model.generate_content(simplified_prompt, stream=True)
+                            fallback_response = client.models.generate_content_stream(model=model_config["model"], 
+                                                                                      contents=simplified_prompt, config={
+                                "temperature": model_config["temperature"],
+                                "top_p": model_config["top_p"],
+                                "top_k": model_config["top_k"]
+                            })
                             # Stream the fallback response
                             for chunk in fallback_response:
                                 if hasattr(chunk, 'text'):

@@ -536,16 +536,11 @@ This file contains...
             # Initialize Google Generative AI model
             google_base_url = os.getenv("GOOGLE_API_BASE_URL")
             google_api_key = os.getenv("GOOGLE_API_KEY")
-            
-            model = genai.GenerativeModel(
-                http_options=HttpOptions(base_url=google_base_url) if google_base_url else None,
-                model_name=model_config["model"],
-                generation_config={
-                    "temperature": model_config["temperature"],
-                    "top_p": model_config["top_p"],
-                    "top_k": model_config["top_k"]
-                }
+            client = genai.Client(
+                http_options=HttpOptions(base_url=google_base_url, api_version='v1'),
+                api_key=google_api_key
             )
+            model = client.models
 
         # Process the response based on the provider
         try:
@@ -621,8 +616,16 @@ This file contains...
                     # Close the WebSocket connection after sending the error message
                     await websocket.close()
             else:
+                logger.info(f"Using Google Generative AI with model: {model_config['model']}")
                 # Generate streaming response
-                response = model.generate_content(prompt, stream=True)
+                response = client.models.generate_content_stream(
+                    model=model_config["model"],
+                    contents=prompt,
+                    config={
+                    "temperature": model_config["temperature"],
+                    "top_p": model_config["top_p"],
+                    "top_k": model_config["top_k"]
+                })
                 # Stream the response
                 for chunk in response:
                     if hasattr(chunk, 'text'):
@@ -741,19 +744,19 @@ This file contains...
                         # Initialize Google Generative AI model
                         model_config = get_model_config(request.provider, request.model)
                         google_base_url = os.getenv("GOOGLE_API_BASE_URL")
-                        
-                        fallback_model = genai.GenerativeModel(
-                            http_options=HttpOptions(base_url=google_base_url) if google_base_url else None,
-                            model_name=model_config["model"],
-                            generation_config={
-                                "temperature": model_config["model_kwargs"].get("temperature", 0.7),
-                                "top_p": model_config["model_kwargs"].get("top_p", 0.8),
-                                "top_k": model_config["model_kwargs"].get("top_k", 40)
-                            }
+                        client = genai.Client(
+                            http_options=HttpOptions(base_url=google_base_url, api_version='v1'),
+                            api_key=google_api_key
                         )
 
                         # Get streaming response using simplified prompt
-                        fallback_response = fallback_model.generate_content(simplified_prompt, stream=True)
+                        logger.info(f"Making fallback Google Generative AI API call with model: {model_config['model']}")
+                        fallback_response = client.models.generate_content_stream(model=model_config["model"], 
+                                                                                  contents=simplified_prompt, config={
+                            "temperature": model_config["temperature"],
+                            "top_p": model_config["top_p"],
+                            "top_k": model_config["top_k"]
+                        })
                         # Stream the fallback response
                         for chunk in fallback_response:
                             if hasattr(chunk, 'text'):

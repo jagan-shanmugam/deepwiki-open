@@ -1,0 +1,3 @@
+[submodule "AdalFlow"]
+	path = AdalFlow
+	url = git@github.com:jagan-shanmugam/AdalFlow.git

@@ -7,9 +7,10 @@ resolution-markers = [
 
 [[package]]
 name = "adalflow"
-version = "1.0.4"
-source = { registry = "https://pypi.org/simple" }
+version = "1.1.2"
+source = { directory = "AdalFlow/adalflow" }
 dependencies = [
+    { name = "asyncstdlib" },
     { name = "backoff" },
     { name = "colorama" },
     { name = "diskcache" },
@@ -17,14 +18,47 @@ dependencies = [
     { name = "jsonlines" },
     { name = "nest-asyncio" },
     { name = "numpy" },
+    { name = "pydantic" },
+    { name = "pytest-asyncio" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "tiktoken" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ee/bc/d58edbfb01f46c2a09c8f5cb186bedcda2f5c3b1643c8b6878b863c7d6f1/adalflow-1.0.4.tar.gz", hash = "sha256:f5c423b590b8a3db31fce8817e0cdfff81101b0ffa5364e2acfae7090f92efce", size = 255085 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/24/2030e6aa359ab245f503100a30aa636ad376b7bd859dafd3972d13030af5/adalflow-1.0.4-py3-none-any.whl", hash = "sha256:d51bc40fc8a17fff83bc0b79d510be8bf4b772bfd594e621d5fb21786371b9f5", size = 310106 },
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.55.0" },
+    { name = "asyncstdlib", specifier = ">=3.13.1,<4.0.0" },
+    { name = "azure-core", marker = "extra == 'azure'", specifier = ">=1.24.0" },
+    { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.12.0" },
+    { name = "backoff", specifier = ">=2.2.1,<3.0.0" },
+    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.35.19,<2.0.0" },
+    { name = "cohere", marker = "extra == 'cohere'", specifier = ">=5.5.8" },
+    { name = "colorama", specifier = ">=0.4.6,<0.5.0" },
+    { name = "diskcache", specifier = ">=5.6.3,<6.0.0" },
+    { name = "faiss-cpu", marker = "extra == 'faiss-cpu'", specifier = ">=1.8.0" },
+    { name = "google-genai", marker = "extra == 'google-genai'", specifier = ">=1.31.0" },
+    { name = "groq", marker = "extra == 'groq'", specifier = ">=0.9.0" },
+    { name = "jinja2", specifier = ">=3.1.3,<4.0.0" },
+    { name = "jsonlines", specifier = ">=4.0.0,<5.0.0" },
+    { name = "lancedb", marker = "extra == 'lancedb'", specifier = ">=0.5.2" },
+    { name = "mcp", marker = "python_full_version >= '3.10' and extra == 'mcp'", specifier = ">=1.9.4,<2.0.0" },
+    { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },
+    { name = "numpy", marker = "python_full_version < '3.10'", specifier = "<2.1.0" },
+    { name = "numpy", marker = "python_full_version >= '3.10'" },
+    { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.2.1" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.97.1" },
+    { name = "pgvector", marker = "extra == 'pgvector'", specifier = ">=0.3.1" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0,<2.0.0" },
+    { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "sqlalchemy", marker = "extra == 'sqlalchemy'", specifier = ">=2.0.30" },
+    { name = "tiktoken", specifier = ">=0.3.3" },
+    { name = "together", marker = "extra == 'together'", specifier = ">=1.3.14" },
+    { name = "torch", marker = "extra == 'torch'", specifier = ">=2.3.1" },
+    { name = "tqdm", specifier = ">=4.66.4,<5.0.0" },
 ]
 
 [[package]]
@@ -118,6 +152,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/95/7d/4c1bd541d4dffa1b52bd83fb8527089e097a106fc90b467a7313b105f840/anyio-4.9.0.tar.gz", hash = "sha256:673c0c244e15788651a4ff38710fea9675823028a6f08a5eda409e0c9840a028", size = 190949 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a1/ee/48ca1a7c89ffec8b6a0c5d02b89c305671d5ffd8d3c94acf8b8c408575bb/anyio-4.9.0-py3-none-any.whl", hash = "sha256:9f76d541cad6e36af7beb62e978876f3b41e3e04f2c1fbf0884604c0a9c4d93c", size = 100916 },
+]
+
+[[package]]
+name = "asyncstdlib"
+version = "3.13.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/e1/72e388631c85233a2fd890d024fc20a8a9961dbba8614d78266636218f1f/asyncstdlib-3.13.1.tar.gz", hash = "sha256:f47564b9a3566f8f9172631d88c75fe074b0ce2127963b7265d310df9aeed03a", size = 49752 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/4a/c86c045bc7bb0244044935ba80c83998f1fdee4f4cef64c6b078e043b0e6/asyncstdlib-3.13.1-py3-none-any.whl", hash = "sha256:a64da68176af1da8c699026cad98f70b184f82b4cb39739e0b9701a2a7541cf9", size = 43993 },
 ]
 
 [[package]]
@@ -366,7 +409,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "adalflow", specifier = ">=0.1.0" },
+    { name = "adalflow", directory = "AdalFlow/adalflow" },
     { name = "aiohttp", specifier = ">=3.8.4" },
     { name = "azure-core", specifier = ">=1.24.0" },
     { name = "azure-identity", specifier = ">=1.12.0" },
@@ -1068,6 +1111,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fb/aa/405082ce2749be5398045152251ac69c0f3578c7077efc53431303af97ce/pytest-8.4.0.tar.gz", hash = "sha256:14d920b48472ea0dbf68e45b96cd1ffda4705f33307dcc86c676c1b5104838a6", size = 1515232 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2f/de/afa024cbe022b1b318a3d224125aa24939e99b4ff6f22e0ba639a2eaee47/pytest-8.4.0-py3-none-any.whl", hash = "sha256:f40f825768ad76c0977cbacdf1fd37c6f7a468e460ea6a0636078f8972d4517e", size = 363797 },
+]
+
+[[package]]
+name = "pytest-asyncio"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4e/51/f8794af39eeb870e87a8c8068642fc07bce0c854d6865d7dd0f2a9d338c2/pytest_asyncio-1.1.0.tar.gz", hash = "sha256:796aa822981e01b68c12e4827b8697108f7205020f24b5793b3c41555dab68ea", size = 46652 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/9d/bf86eddabf8c6c9cb1ea9a869d6873b46f105a5d292d3a6f7071f5b07935/pytest_asyncio-1.1.0-py3-none-any.whl", hash = "sha256:5fe2d69607b0bd75c656d1211f969cadba035030156745ee09e7d71740e58ecf", size = 15157 },
 ]
 
 [[package]]
