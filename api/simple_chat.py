@@ -3,7 +3,8 @@ import os
 from typing import List, Optional
 from urllib.parse import unquote
 
-import google.generativeai as genai
+from google import genai
+from google.genai.types import HttpOptions
 from adalflow.components.model_client.ollama_client import OllamaClient
 from adalflow.core.types import ModelType
 from fastapi import FastAPI, HTTPException
@@ -435,6 +436,7 @@ async def chat_completions_stream(request: ChatCompletionRequest):
         else:
             # Initialize Google Generative AI model
             model = genai.GenerativeModel(
+                http_options=HttpOptions(base_url=os.getenv("GOOGLE_API_BASE_URL")),
                 model_name=model_config["model"],
                 generation_config={
                     "temperature": model_config["temperature"],
@@ -651,7 +653,10 @@ async def chat_completions_stream(request: ChatCompletionRequest):
                         else:
                             # Initialize Google Generative AI model
                             model_config = get_model_config(request.provider, request.model)
+                            google_base_url = os.getenv("GOOGLE_API_BASE_URL")
+                            
                             fallback_model = genai.GenerativeModel(
+                                http_options=HttpOptions(base_url=google_base_url) if google_base_url else None,
                                 model_name=model_config["model"],
                                 generation_config={
                                     "temperature": model_config["model_kwargs"].get("temperature", 0.7),

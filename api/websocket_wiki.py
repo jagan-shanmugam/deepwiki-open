@@ -3,7 +3,8 @@ import os
 from typing import List, Optional, Dict, Any
 from urllib.parse import unquote
 
-import google.generativeai as genai
+from google import genai
+from google.genai.types import HttpOptions
 from adalflow.components.model_client.ollama_client import OllamaClient
 from adalflow.core.types import ModelType
 from fastapi import WebSocket, WebSocketDisconnect, HTTPException
@@ -57,6 +58,7 @@ async def handle_websocket_chat(websocket: WebSocket):
     await websocket.accept()
 
     try:
+        
         # Receive and parse the request data
         request_data = await websocket.receive_json()
         request = ChatCompletionRequest(**request_data)
@@ -74,6 +76,8 @@ async def handle_websocket_chat(websocket: WebSocket):
 
         # Create a new RAG instance for this request
         try:
+            logger.info(f"request.provider: {request.provider}")
+            logger.info(f"request.model: {request.model}")
             request_rag = RAG(provider=request.provider, model=request.model)
 
             # Extract custom file filter parameters if provided
@@ -530,7 +534,11 @@ This file contains...
             )
         else:
             # Initialize Google Generative AI model
+            google_base_url = os.getenv("GOOGLE_API_BASE_URL")
+            google_api_key = os.getenv("GOOGLE_API_KEY")
+            
             model = genai.GenerativeModel(
+                http_options=HttpOptions(base_url=google_base_url) if google_base_url else None,
                 model_name=model_config["model"],
                 generation_config={
                     "temperature": model_config["temperature"],
@@ -732,7 +740,10 @@ This file contains...
                     else:
                         # Initialize Google Generative AI model
                         model_config = get_model_config(request.provider, request.model)
+                        google_base_url = os.getenv("GOOGLE_API_BASE_URL")
+                        
                         fallback_model = genai.GenerativeModel(
+                            http_options=HttpOptions(base_url=google_base_url) if google_base_url else None,
                             model_name=model_config["model"],
                             generation_config={
                                 "temperature": model_config["model_kwargs"].get("temperature", 0.7),
