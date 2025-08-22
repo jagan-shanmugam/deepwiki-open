@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { loadToken, saveToken } from '@/utils/secureStorage';
 
 interface TokenInputProps {
   selectedPlatform: 'github' | 'gitlab' | 'bitbucket';
@@ -25,6 +26,31 @@ export default function TokenInput({
   const { messages: t } = useLanguage();
 
   const platformName = selectedPlatform.charAt(0).toUpperCase() + selectedPlatform.slice(1);
+
+  // Load saved token for currently selected platform on mount/when platform changes
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        console.log('loading token for', selectedPlatform);
+        const stored = await loadToken(selectedPlatform);
+        console.log('stored token for', selectedPlatform, stored, 'accessToken', accessToken);
+        if (!cancelled) {
+          // Always set the accessToken to the stored value (or empty string if not found)
+          setAccessToken(stored || '');
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedPlatform]);
+
+  // Persist on blur or when value changes with small debounce (avoid per-keystroke writes)
+  const handleBlur = useCallback(() => {
+    // Fire-and-forget persistence
+    saveToken(selectedPlatform, accessToken || '');
+  }, [selectedPlatform, accessToken]);
 
   return (
     <div className="mb-4">
@@ -89,6 +115,7 @@ export default function TokenInput({
               type="password"
               value={accessToken}
               onChange={(e) => setAccessToken(e.target.value)}
+              onBlur={handleBlur}
               placeholder={(t.form?.tokenPlaceholder || 'Enter your access token').replace('{platform}', platformName)}
               className="input-japanese block w-full px-3 py-2 rounded-md bg-transparent text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-primary)] text-sm"
             />

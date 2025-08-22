@@ -73,7 +73,7 @@ export default function ModelSelectionModal({
   setAuthCode,
   isAuthLoading,
   showWikiType = true,
-  showTokenInput = false,
+  showTokenInput = true,
   repositoryType = 'github',
 }: ModelSelectionModalProps) {
   const { messages: t } = useLanguage();

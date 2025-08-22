@@ -99,7 +99,7 @@ export default function ConfigurationModal({
   const { messages: t } = useLanguage();
 
   // Show token section state
-  const [showTokenSection, setShowTokenSection] = useState(false);
+  const [showTokenSection, setShowTokenSection] = useState(true);
 
   if (!isOpen) return null;
 

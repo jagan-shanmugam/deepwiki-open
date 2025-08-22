@@ -13,6 +13,7 @@ import { extractUrlDomain, extractUrlPath } from '@/utils/urlDecoder';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { loadToken } from '@/utils/secureStorage';
 import { FaBitbucket, FaBookOpen, FaComments, FaDownload, FaExclamationTriangle, FaFileExport, FaFolder, FaGithub, FaGitlab, FaHome, FaSync, FaTimes } from 'react-icons/fa';
 // Define the WikiSection and WikiStructure types directly in this file
 // since the imported types don't have the sections and rootSections properties
@@ -1676,7 +1677,26 @@ IMPORTANT:
             language: language,
             comprehensive: isComprehensiveView.toString(),
           });
-          const response = await fetch(`/api/wiki_cache?${params.toString()}`);
+          const headers: Record<string, string> = {};
+          let tokenToUse = currentToken;
+          if (!tokenToUse) {
+            try {
+              tokenToUse = await loadToken(effectiveRepoInfo.type as 'github' | 'gitlab' | 'bitbucket');
+            } catch {}
+          }
+          if (tokenToUse) {
+            if (effectiveRepoInfo.type === 'github') {
+              headers['Authorization'] = `token ${tokenToUse}`;
+            } else if (effectiveRepoInfo.type === 'gitlab') {
+              headers['PRIVATE-TOKEN'] = tokenToUse;
+            } else if (effectiveRepoInfo.type === 'bitbucket') {
+              // Prefer OAuth2 bearer if provided; app passwords would require Basic with username, which is not available here
+              // TODO(bitbucket): Switch to Basic auth using username:app_password when UI captures username
+              headers['Authorization'] = `Bearer ${tokenToUse}`;
+            }
+          }
+          console.log('headers', headers);
+          const response = await fetch(`/api/wiki_cache?${params.toString()}`, { headers });
 
           if (response.ok) {
             const cachedData = await response.json(); // Returns null if no cache

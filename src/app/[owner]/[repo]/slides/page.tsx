@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
+import { loadToken } from '@/utils/secureStorage';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { FaArrowLeft, FaSync, FaDownload, FaArrowRight, FaArrowUp, FaTimes } from 'react-icons/fa';
@@ -127,7 +128,24 @@ export default function SlidesPage() {
         repo_type: repoInfo.type,
         language: language,
       });
-      const response = await fetch(`/api/wiki_cache?${params.toString()}`);
+      const headers: Record<string, string> = {};
+      let tokenToUse = token;
+      if (!tokenToUse) {
+        try {
+          tokenToUse = await loadToken(repoType as 'github' | 'gitlab' | 'bitbucket');
+        } catch {}
+      }
+      if (tokenToUse) {
+        if (repoType === 'github') {
+          headers['Authorization'] = `token ${tokenToUse}`;
+        } else if (repoType === 'gitlab') {
+          headers['PRIVATE-TOKEN'] = tokenToUse;
+        } else if (repoType === 'bitbucket') {
+          // TODO(bitbucket): Switch to Basic auth using username:app_password when UI captures username
+          headers['Authorization'] = `Bearer ${tokenToUse}`;
+        }
+      }
+      const response = await fetch(`/api/wiki_cache?${params.toString()}`, { headers });
 
       if (response.ok) {
         const cachedData = await response.json();
