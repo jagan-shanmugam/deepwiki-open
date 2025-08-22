@@ -27,6 +27,7 @@ WORKDIR /app
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY api/requirements.txt ./api/
+COPY AdalFlow/ ./AdalFlow/
 RUN pip install --no-cache -r api/requirements.txt
 
 # Use Python 3.11 as final image
@@ -65,6 +66,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy Python dependencies
 COPY --from=py_deps /opt/venv /opt/venv
+COPY --from=py_deps /app/AdalFlow ./AdalFlow
 COPY api/ ./api/
 
 # Copy Node app

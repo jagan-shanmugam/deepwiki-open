@@ -3,7 +3,7 @@ uvicorn[standard]>=0.21.1
 pydantic>=2.0.0
 google-genai>=0.3.0
 tiktoken>=0.5.0
-adalflow @ {root:uri}/AdalFlow/adalflow
+-e ./AdalFlow/adalflow
 numpy>=1.24.0
 faiss-cpu>=1.7.4
 langid>=1.1.6

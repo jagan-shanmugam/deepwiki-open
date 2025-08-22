@@ -5,9 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from typing import List, Optional, Dict, Any, Literal
 import json
+import urllib.parse
 from datetime import datetime
 from pydantic import BaseModel, Field
 import asyncio
+import requests
 
 # Configure logging
 from api.logging_config import setup_logging
@@ -96,6 +98,7 @@ class WikiCacheData(BaseModel):
     repo: Optional[RepoInfo] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    is_private: Optional[bool] = None
 
 class WikiCacheRequest(BaseModel):
     """
@@ -422,17 +425,144 @@ async def read_wiki_cache(owner: str, repo: str, repo_type: str, language: str) 
             return None
     return None
 
+
+def _extract_auth_headers_for_provider(request: Request, repo_type: str) -> Dict[str, str]:
+    """
+    Extract and normalize auth headers from the incoming request for the target provider.
+
+    Rules:
+    - Prefer standard Authorization header if present (Bearer/token/Basic, passed through as-is)
+    - For GitLab, also support PRIVATE-TOKEN or X-Gitlab-Token
+    - For GitHub, also support X-Github-Token (prefixed with 'token ')
+    - For Bitbucket, Authorization Basic is expected (username:app_password); we pass through
+    """
+    headers: Dict[str, str] = {}
+
+    # Pass through standard Authorization header when provided
+    auth_header = request.headers.get('Authorization')
+    if auth_header:
+        headers['Authorization'] = auth_header
+
+    # Provider-specific alternative headers
+    lower_type = (repo_type or '').lower()
+    if lower_type == 'gitlab':
+        gitlab_token = request.headers.get('PRIVATE-TOKEN') or request.headers.get('X-Gitlab-Token')
+        if gitlab_token and 'Authorization' not in headers:
+            headers['PRIVATE-TOKEN'] = gitlab_token
+    elif lower_type == 'github':
+        gh_token = request.headers.get('X-Github-Token') or request.headers.get('X-Git-Token')
+        if gh_token and 'Authorization' not in headers:
+            headers['Authorization'] = f'token {gh_token}'
+    elif lower_type == 'bitbucket':
+        # For Bitbucket Cloud, App Passwords use Basic auth with username:app_password
+        # Expect client to send an Authorization: Basic <base64(username:app_password)>
+        # Nothing additional to do here if Authorization already present.
+        # TODO(bitbucket): Add explicit Basic auth extraction/normalization when we support username prompt on client.
+        pass
+
+    return headers
+
+
+def _compute_api_base(repo_type: str, repo_url: Optional[str]) -> Optional[str]:
+    """
+    Compute provider API base from repo URL, supporting enterprise/self-hosted instances.
+
+    - GitHub: https://api.github.com (public) or https://<host>/api/v3 (enterprise)
+    - GitLab: https://gitlab.com/api/v4 (public) or https://<host>/api/v4 (self-hosted)
+    - Bitbucket: https://api.bitbucket.org/2.0 (cloud)
+    """
+    provider = (repo_type or '').lower()
+    if provider == 'github':
+        if not repo_url:
+            return 'https://api.github.com'
+        try:
+            parsed = urllib.parse.urlparse(repo_url)
+            host = parsed.hostname or ''
+            if host.lower() == 'github.com':
+                return 'https://api.github.com'
+            # GitHub Enterprise
+            return f"{parsed.scheme}://{host}/api/v3"
+        except Exception:
+            return 'https://api.github.com'
+    elif provider == 'gitlab':
+        if not repo_url:
+            return 'https://gitlab.com/api/v4'
+        try:
+            parsed = urllib.parse.urlparse(repo_url)
+            host = parsed.hostname or ''
+            scheme = parsed.scheme or 'https'
+            return f"{scheme}://{host}/api/v4"
+        except Exception:
+            return 'https://gitlab.com/api/v4'
+    elif provider == 'bitbucket':
+        # TODO(bitbucket): Detect Bitbucket Server/DC API base from repo_url when we add enterprise support.
+        return 'https://api.bitbucket.org/2.0'
+    return None
+
+
+def _verify_repo_access_with_pat(repo_type: str, owner: str, repo: str, request: Request, repo_url: Optional[str]) -> bool:
+    """
+    Verifies that the requester has access to the given repository using a PAT or provider auth
+    forwarded in request headers.
+
+    Returns True if access is confirmed, False otherwise.
+    """
+    try:
+        headers = _extract_auth_headers_for_provider(request, repo_type)
+        if not headers:
+            return False
+
+        provider = (repo_type or '').lower()
+        api_base = _compute_api_base(repo_type, repo_url)
+        if provider == 'github':
+            base = api_base or 'https://api.github.com'
+            url = f"{base}/repos/{owner}/{repo}"
+            resp = requests.get(url, headers=headers, timeout=10)
+            return resp.status_code == 200
+        elif provider == 'gitlab':
+            # GitLab expects URL-encoded project path owner/repo
+            project_path = urllib.parse.quote(f'{owner}/{repo}', safe='')
+            base = api_base or 'https://gitlab.com/api/v4'
+            url = f"{base}/projects/{project_path}"
+            resp = requests.get(url, headers=headers, timeout=10)
+            return resp.status_code == 200
+        elif provider == 'bitbucket':
+            # TODO(bitbucket): Support server/DC verification (may require different endpoints and auth)
+            url = f'https://api.bitbucket.org/2.0/repositories/{owner}/{repo}'
+            resp = requests.get(url, headers=headers, timeout=10)
+            return resp.status_code == 200
+        else:
+            # Unknown provider, deny
+            return False
+    except Exception as e:
+        logger.warning(f"Error verifying repo access with PAT for {repo_type}:{owner}/{repo}: {e}")
+        return False
+
 async def save_wiki_cache(data: WikiCacheRequest) -> bool:
     """Saves wiki cache data to the file system."""
     cache_path = get_wiki_cache_path(data.repo.owner, data.repo.repo, data.repo.type, data.language)
     logger.info(f"Attempting to save wiki cache. Path: {cache_path}")
     try:
+        # Derive privacy: mark private if a token was supplied when generating
+        is_private = False
+        try:
+            is_private = bool(getattr(data.repo, 'token', None)) and getattr(data.repo, 'token') != ''
+        except Exception:
+            is_private = False
+
+        # Sanitize repo info: never persist tokens in cache
+        repo_dict = data.repo.model_dump() if data.repo else None
+        if repo_dict and 'token' in repo_dict:
+            repo_dict['token'] = None
+
         payload = WikiCacheData(
             wiki_structure=data.wiki_structure,
             generated_pages=data.generated_pages,
-            repo=data.repo,
+            repo=RepoInfo(**repo_dict) if repo_dict else None,
+            # repo=RepoInfo(**repo_dict) if repo_dict else None,
             provider=data.provider,
-            model=data.model
+            model=data.model,
+            is_private=is_private
         )
         # Log size of data to be cached for debugging (avoid logging full content if large)
         try:
@@ -459,10 +589,11 @@ async def save_wiki_cache(data: WikiCacheRequest) -> bool:
 
 @app.get("/api/wiki_cache", response_model=Optional[WikiCacheData])
 async def get_cached_wiki(
+    request: Request,
     owner: str = Query(..., description="Repository owner"),
     repo: str = Query(..., description="Repository name"),
     repo_type: str = Query(..., description="Repository type (e.g., github, gitlab)"),
-    language: str = Query(..., description="Language of the wiki content")
+    language: str = Query(..., description="Language of the wiki content"),
 ):
     """
     Retrieves cached wiki data (structure and generated pages) for a repository.
@@ -475,6 +606,27 @@ async def get_cached_wiki(
     logger.info(f"Attempting to retrieve wiki cache for {owner}/{repo} ({repo_type}), lang: {language}")
     cached_data = await read_wiki_cache(owner, repo, repo_type, language)
     if cached_data:
+        # Enforce additional auth for private caches: require valid repo access via PAT/OAuth
+        try:
+            is_private = bool(getattr(cached_data, 'is_private', False))
+        except Exception:
+            is_private = False
+
+        if is_private:
+            # Validate repository access with provided credentials in headers
+            repo_url = None
+            try:
+                repo_url = getattr(getattr(cached_data, 'repo', None), 'repoUrl', None)
+            except Exception:
+                repo_url = None
+            has_access = _verify_repo_access_with_pat(repo_type, owner, repo, request, repo_url)
+            if not has_access:
+                raise HTTPException(status_code=401, detail="Repository access required to view private cache")
+
+        # Optional: also enforce global authorization code if configured (kept commented per existing behavior)
+        # if WIKI_AUTH_MODE:
+        #     if not authorization_code or WIKI_AUTH_CODE != authorization_code:
+        #         raise HTTPException(status_code=401, detail="Authorization required to access cache")
         return cached_data
     else:
         # Return 200 with null body if not found, as frontend expects this behavior
@@ -517,7 +669,7 @@ async def delete_wiki_cache(
         raise HTTPException(status_code=400, detail="Language is not supported")
 
     if WIKI_AUTH_MODE:
-        logger.info("check the authorization code")
+        logger.info("check the authorization code") 
         if WIKI_AUTH_CODE != authorization_code:
             raise HTTPException(status_code=401, detail="Authorization code is invalid")
 
