@@ -1,23 +1,31 @@
 import logging
-import weakref
 import re
 from dataclasses import dataclass
-from typing import Any, List, Tuple, Dict
+from typing import Any, List, Tuple, Dict, Optional
 from uuid import uuid4
 
-import adalflow as adal
+import dspy
 
-from api.tools.embedder import get_embedder
+from api.dspy_components import get_embedder, FAISSRetriever
 from api.prompts import RAG_SYSTEM_PROMPT as system_prompt, RAG_TEMPLATE
 
-# Create our own implementation of the conversation classes
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Maximum token limit for embedding models
+MAX_INPUT_TOKENS = 7500  # Safe threshold below 8192 token limit
+
+
+# Conversation classes for memory management
 @dataclass
 class UserQuery:
     query_str: str
 
+
 @dataclass
 class AssistantResponse:
     response_str: str
+
 
 @dataclass
 class DialogTurn:
@@ -25,8 +33,9 @@ class DialogTurn:
     user_query: UserQuery
     assistant_response: AssistantResponse
 
+
 class CustomConversation:
-    """Custom implementation of Conversation to fix the list assignment index out of range error"""
+    """Custom implementation of Conversation for managing dialog history"""
 
     def __init__(self):
         self.dialog_turns = []
@@ -37,30 +46,17 @@ class CustomConversation:
             self.dialog_turns = []
         self.dialog_turns.append(dialog_turn)
 
-# Import other adalflow components
-from adalflow.components.retriever.faiss_retriever import FAISSRetriever
-from api.config import configs
-from api.data_pipeline import DatabaseManager
 
-# Configure logging
-logger = logging.getLogger(__name__)
-
-# Maximum token limit for embedding models
-MAX_INPUT_TOKENS = 7500  # Safe threshold below 8192 token limit
-
-class Memory(adal.core.component.DataComponent):
-    """Simple conversation management with a list of dialog turns."""
+class Memory:
+    """Simple conversation memory management."""
 
     def __init__(self):
-        super().__init__()
-        # Use our custom implementation instead of the original Conversation class
         self.current_conversation = CustomConversation()
 
-    def call(self) -> Dict:
+    def __call__(self) -> Dict:
         """Return the conversation history as a dictionary."""
         all_dialog_turns = {}
         try:
-            # Check if dialog_turns exists and is a list
             if hasattr(self.current_conversation, 'dialog_turns'):
                 if self.current_conversation.dialog_turns:
                     logger.info(f"Memory content: {len(self.current_conversation.dialog_turns)} turns")
@@ -74,11 +70,9 @@ class Memory(adal.core.component.DataComponent):
                     logger.info("Dialog turns list exists but is empty")
             else:
                 logger.info("No dialog_turns attribute in current_conversation")
-                # Try to initialize it
                 self.current_conversation.dialog_turns = []
         except Exception as e:
             logger.error(f"Error accessing dialog turns: {str(e)}")
-            # Try to recover
             try:
                 self.current_conversation = CustomConversation()
                 logger.info("Recovered by creating new conversation")
@@ -100,32 +94,26 @@ class Memory(adal.core.component.DataComponent):
             bool: True if successful, False otherwise
         """
         try:
-            # Create a new dialog turn using our custom implementation
             dialog_turn = DialogTurn(
                 id=str(uuid4()),
                 user_query=UserQuery(query_str=user_query),
                 assistant_response=AssistantResponse(response_str=assistant_response),
             )
 
-            # Make sure the current_conversation has the append_dialog_turn method
             if not hasattr(self.current_conversation, 'append_dialog_turn'):
                 logger.warning("current_conversation does not have append_dialog_turn method, creating new one")
-                # Initialize a new conversation if needed
                 self.current_conversation = CustomConversation()
 
-            # Ensure dialog_turns exists
             if not hasattr(self.current_conversation, 'dialog_turns'):
                 logger.warning("dialog_turns not found, initializing empty list")
                 self.current_conversation.dialog_turns = []
 
-            # Safely append the dialog turn
             self.current_conversation.dialog_turns.append(dialog_turn)
             logger.info(f"Successfully added dialog turn, now have {len(self.current_conversation.dialog_turns)} turns")
             return True
 
         except Exception as e:
             logger.error(f"Error adding dialog turn: {str(e)}")
-            # Try to recover by creating a new conversation
             try:
                 self.current_conversation = CustomConversation()
                 dialog_turn = DialogTurn(
@@ -141,27 +129,41 @@ class Memory(adal.core.component.DataComponent):
                 return False
 
 
-from dataclasses import dataclass, field
+# DSPy Signature for RAG
+class RAGSignature(dspy.Signature):
+    """Answer questions based on the provided context from the repository."""
 
+    # Input fields
+    system_prompt: str = dspy.InputField(desc="System instructions for the assistant")
+    context: str = dspy.InputField(desc="Relevant code and documentation from the repository")
+    conversation_history: str = dspy.InputField(desc="Previous conversation turns")
+    question: str = dspy.InputField(desc="User's question about the codebase")
+
+    # Output fields
+    rationale: str = dspy.OutputField(desc="Chain of thoughts for the answer")
+    answer: str = dspy.OutputField(
+        desc="Answer to the user query, formatted in markdown. DO NOT include ``` triple backticks fences."
+    )
+
+
+# Simple dataclass for backward compatibility
 @dataclass
-class RAGAnswer(adal.DataClass):
-    rationale: str = field(default="", metadata={"desc": "Chain of thoughts for the answer."})
-    answer: str = field(default="", metadata={"desc": "Answer to the user query, formatted in markdown for beautiful rendering with react-markdown. DO NOT include ``` triple backticks fences at the beginning or end of your answer."})
+class RAGAnswer:
+    rationale: str = ""
+    answer: str = ""
 
-    __output_fields__ = ["rationale", "answer"]
 
-class RAG(adal.Component):
-    """RAG with one repo.
-    If you want to load a new repos, call prepare_retriever(repo_url_or_path) first."""
+class RAG(dspy.Module):
+    """RAG with DSPy for repository-based question answering."""
 
-    def __init__(self, provider="google", model=None, use_s3: bool = False):  # noqa: F841 - use_s3 is kept for compatibility
+    def __init__(self, provider="google", model=None, use_s3: bool = False):
         """
         Initialize the RAG component.
 
         Args:
-            provider: Model provider to use (google, openai, openrouter, ollama)
+            provider: Model provider to use (google, openai, openrouter, ollama, azure)
             model: Model name to use with the provider
-            use_s3: Whether to use S3 for database storage (default: False)
+            use_s3: Whether to use S3 for database storage (kept for compatibility, not used)
         """
         super().__init__()
 
@@ -169,188 +171,113 @@ class RAG(adal.Component):
         self.model = model
 
         # Import the helper functions
-        from api.config import get_embedder_config, get_embedder_type
+        from api.config import get_embedder_type
 
         # Determine embedder type based on current configuration
         self.embedder_type = get_embedder_type()
-        self.is_ollama_embedder = (self.embedder_type == 'ollama')  # Backward compatibility
-
-        # Check if Ollama model exists before proceeding
-        if self.is_ollama_embedder:
-            from api.ollama_patch import check_ollama_model_exists
-            from api.config import get_embedder_config
-            
-            embedder_config = get_embedder_config()
-            if embedder_config and embedder_config.get("model_kwargs", {}).get("model"):
-                model_name = embedder_config["model_kwargs"]["model"]
-                if not check_ollama_model_exists(model_name):
-                    raise Exception(f"Ollama model '{model_name}' not found. Please run 'ollama pull {model_name}' to install it.")
 
         # Initialize components
         self.memory = Memory()
         self.embedder = get_embedder(embedder_type=self.embedder_type)
 
-        self_weakref = weakref.ref(self)
-        # Patch: ensure query embedding is always single string for Ollama
-        def single_string_embedder(query):
-            # Accepts either a string or a list, always returns embedding for a single string
-            if isinstance(query, list):
-                if len(query) != 1:
-                    raise ValueError("Ollama embedder only supports a single string")
-                query = query[0]
-            instance = self_weakref()
-            assert instance is not None, "RAG instance is no longer available, but the query embedder was called."
-            return instance.embedder(input=query)
-
-        # Use single string embedder for Ollama, regular embedder for others
-        self.query_embedder = single_string_embedder if self.is_ollama_embedder else self.embedder
-
+        # Initialize database manager
         self.initialize_db_manager()
 
-        # Set up the output parser
-        data_parser = adal.DataClassParser(data_class=RAGAnswer, return_data_class=True)
+        # Configure DSPy LM
+        self._configure_dspy_lm()
 
-        # Format instructions to ensure proper output structure
-        format_instructions = data_parser.get_output_format_str() + """
+        # Initialize DSPy module for generation
+        self.generate_answer = dspy.ChainOfThought(RAGSignature)
 
-IMPORTANT FORMATTING RULES:
-1. DO NOT include your thinking or reasoning process in the output
-2. Provide only the final, polished answer
-3. DO NOT include ```markdown fences at the beginning or end of your answer
-4. DO NOT wrap your response in any kind of fences
-5. Start your response directly with the content
-6. The content will already be rendered as markdown
-7. Do not use backslashes before special characters like [ ] { } in your answer
-8. When listing tags or similar items, write them as plain text without escape characters
-9. For pipe characters (|) in text, write them directly without escaping them"""
-
-        # Get model configuration based on provider and model
+    def _configure_dspy_lm(self):
+        """Configure DSPy language model based on provider and model."""
         from api.config import get_model_config
+        import os
+
+        # Get model configuration
         generator_config = get_model_config(self.provider, self.model)
+        model_kwargs = generator_config.get("model_kwargs", {})
 
-        # Set up the main generator
-        self.generator = adal.Generator(
-            template=RAG_TEMPLATE,
-            prompt_kwargs={
-                "output_format_str": format_instructions,
-                "conversation_history": self.memory(),
-                "system_prompt": system_prompt,
-                "contexts": None,
-            },
-            model_client=generator_config["model_client"](),
-            model_kwargs=generator_config["model_kwargs"],
-            output_processors=data_parser,
-        )
+        # Build model identifier based on provider
+        if self.provider == "google":
+            model_name = model_kwargs.get("model", "gemini-2.0-flash-exp")
+            lm_identifier = f"gemini/{model_name}"
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            lm_kwargs = {"api_key": api_key} if api_key else {}
 
+        elif self.provider == "openai":
+            model_name = model_kwargs.get("model", "gpt-4o-mini")
+            lm_identifier = f"openai/{model_name}"
+            api_key = os.getenv("OPENAI_API_KEY")
+            lm_kwargs = {"api_key": api_key} if api_key else {}
+
+        elif self.provider == "ollama":
+            model_name = model_kwargs.get("model", "llama3.2")
+            lm_identifier = f"ollama_chat/{model_name}"
+            api_base = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+            lm_kwargs = {"api_base": api_base, "api_key": ""}
+
+        elif self.provider == "azure":
+            deployment_name = model_kwargs.get("model", "gpt-4o-mini")
+            lm_identifier = f"azure/{deployment_name}"
+            lm_kwargs = {
+                "api_key": os.getenv("AZURE_API_KEY"),
+                "api_base": os.getenv("AZURE_API_BASE"),
+                "api_version": os.getenv("AZURE_API_VERSION", "2024-02-15-preview")
+            }
+
+        elif self.provider == "openrouter":
+            model_name = model_kwargs.get("model", "anthropic/claude-3.5-sonnet")
+            lm_identifier = f"openrouter/{model_name}"
+            api_key = os.getenv("OPENROUTER_API_KEY")
+            lm_kwargs = {"api_key": api_key} if api_key else {}
+
+        else:
+            # Default to Google
+            logger.warning(f"Unknown provider {self.provider}, defaulting to Google")
+            model_name = "gemini-2.0-flash-exp"
+            lm_identifier = f"gemini/{model_name}"
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            lm_kwargs = {"api_key": api_key} if api_key else {}
+
+        # Add common parameters
+        if "temperature" in model_kwargs:
+            lm_kwargs["temperature"] = model_kwargs["temperature"]
+        if "max_tokens" in model_kwargs:
+            lm_kwargs["max_tokens"] = model_kwargs["max_tokens"]
+
+        # Create and configure DSPy LM
+        try:
+            lm = dspy.LM(lm_identifier, **lm_kwargs)
+            dspy.configure(lm=lm)
+            logger.info(f"Configured DSPy LM: {lm_identifier}")
+        except Exception as e:
+            logger.error(f"Error configuring DSPy LM: {e}")
+            raise
 
     def initialize_db_manager(self):
         """Initialize the database manager with local storage"""
+        from api.data_pipeline import DatabaseManager
         self.db_manager = DatabaseManager()
         self.transformed_docs = []
+        self.retriever = None
 
-    def _validate_and_filter_embeddings(self, documents: List) -> List:
-        """
-        Validate embeddings and filter out documents with invalid or mismatched embedding sizes.
-
-        Args:
-            documents: List of documents with embeddings
-
-        Returns:
-            List of documents with valid embeddings of consistent size
-        """
-        if not documents:
-            logger.warning("No documents provided for embedding validation")
-            return []
-
-        valid_documents = []
-        embedding_sizes = {}
-
-        # First pass: collect all embedding sizes and count occurrences
-        for i, doc in enumerate(documents):
-            if not hasattr(doc, 'vector') or doc.vector is None:
-                logger.warning(f"Document {i} has no embedding vector, skipping")
-                continue
-
-            try:
-                if isinstance(doc.vector, list):
-                    embedding_size = len(doc.vector)
-                elif hasattr(doc.vector, 'shape'):
-                    embedding_size = doc.vector.shape[0] if len(doc.vector.shape) == 1 else doc.vector.shape[-1]
-                elif hasattr(doc.vector, '__len__'):
-                    embedding_size = len(doc.vector)
-                else:
-                    logger.warning(f"Document {i} has invalid embedding vector type: {type(doc.vector)}, skipping")
-                    continue
-
-                if embedding_size == 0:
-                    logger.warning(f"Document {i} has empty embedding vector, skipping")
-                    continue
-
-                embedding_sizes[embedding_size] = embedding_sizes.get(embedding_size, 0) + 1
-
-            except Exception as e:
-                logger.warning(f"Error checking embedding size for document {i}: {str(e)}, skipping")
-                continue
-
-        if not embedding_sizes:
-            logger.error("No valid embeddings found in any documents")
-            return []
-
-        # Find the most common embedding size (this should be the correct one)
-        target_size = max(embedding_sizes.keys(), key=lambda k: embedding_sizes[k])
-        logger.info(f"Target embedding size: {target_size} (found in {embedding_sizes[target_size]} documents)")
-
-        # Log all embedding sizes found
-        for size, count in embedding_sizes.items():
-            if size != target_size:
-                logger.warning(f"Found {count} documents with incorrect embedding size {size}, will be filtered out")
-
-        # Second pass: filter documents with the target embedding size
-        for i, doc in enumerate(documents):
-            if not hasattr(doc, 'vector') or doc.vector is None:
-                continue
-
-            try:
-                if isinstance(doc.vector, list):
-                    embedding_size = len(doc.vector)
-                elif hasattr(doc.vector, 'shape'):
-                    embedding_size = doc.vector.shape[0] if len(doc.vector.shape) == 1 else doc.vector.shape[-1]
-                elif hasattr(doc.vector, '__len__'):
-                    embedding_size = len(doc.vector)
-                else:
-                    continue
-
-                if embedding_size == target_size:
-                    valid_documents.append(doc)
-                else:
-                    # Log which document is being filtered out
-                    file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
-                    logger.warning(f"Filtering out document '{file_path}' due to embedding size mismatch: {embedding_size} != {target_size}")
-
-            except Exception as e:
-                file_path = getattr(doc, 'meta_data', {}).get('file_path', f'document_{i}')
-                logger.warning(f"Error validating embedding for document '{file_path}': {str(e)}, skipping")
-                continue
-
-        logger.info(f"Embedding validation complete: {len(valid_documents)}/{len(documents)} documents have valid embeddings")
-
-        if len(valid_documents) == 0:
-            logger.error("No documents with valid embeddings remain after filtering")
-        elif len(valid_documents) < len(documents):
-            filtered_count = len(documents) - len(valid_documents)
-            logger.warning(f"Filtered out {filtered_count} documents due to embedding issues")
-
-        return valid_documents
-
-    def prepare_retriever(self, repo_url_or_path: str, type: str = "github", access_token: str = None,
-                      excluded_dirs: List[str] = None, excluded_files: List[str] = None,
-                      included_dirs: List[str] = None, included_files: List[str] = None):
+    def prepare_retriever(
+        self,
+        repo_url_or_path: str,
+        type: str = "github",
+        access_token: str = None,
+        excluded_dirs: List[str] = None,
+        excluded_files: List[str] = None,
+        included_dirs: List[str] = None,
+        included_files: List[str] = None
+    ):
         """
         Prepare the retriever for a repository.
-        Will load database from local storage if available.
 
         Args:
             repo_url_or_path: URL or local path to the repository
+            type: Repository type (github, gitlab, bitbucket)
             access_token: Optional access token for private repositories
             excluded_dirs: Optional list of directories to exclude from processing
             excluded_files: Optional list of file patterns to exclude from processing
@@ -359,6 +286,8 @@ IMPORTANT FORMATTING RULES:
         """
         self.initialize_db_manager()
         self.repo_url_or_path = repo_url_or_path
+
+        # Prepare database and get documents
         self.transformed_docs = self.db_manager.prepare_database(
             repo_url_or_path,
             type,
@@ -369,70 +298,73 @@ IMPORTANT FORMATTING RULES:
             included_dirs=included_dirs,
             included_files=included_files
         )
+
         logger.info(f"Loaded {len(self.transformed_docs)} documents for retrieval")
 
-        # Validate and filter embeddings to ensure consistent sizes
-        self.transformed_docs = self._validate_and_filter_embeddings(self.transformed_docs)
-
         if not self.transformed_docs:
-            raise ValueError("No valid documents with embeddings found. Cannot create retriever.")
+            raise ValueError("No valid documents found. Cannot create retriever.")
 
-        logger.info(f"Using {len(self.transformed_docs)} documents with valid embeddings for retrieval")
+        # Get the retriever from the database manager
+        self.retriever = self.db_manager.retriever
+        logger.info("Retriever prepared successfully")
 
-        try:
-            # Use the appropriate embedder for retrieval
-            retrieve_embedder = self.query_embedder if self.is_ollama_embedder else self.embedder
-            self.retriever = FAISSRetriever(
-                **configs["retriever"],
-                embedder=retrieve_embedder,
-                documents=self.transformed_docs,
-                document_map_func=lambda doc: doc.vector,
-            )
-            logger.info("FAISS retriever created successfully")
-        except Exception as e:
-            logger.error(f"Error creating FAISS retriever: {str(e)}")
-            # Try to provide more specific error information
-            if "All embeddings should be of the same size" in str(e):
-                logger.error("Embedding size validation failed. This suggests there are still inconsistent embedding sizes.")
-                # Log embedding sizes for debugging
-                sizes = []
-                for i, doc in enumerate(self.transformed_docs[:10]):  # Check first 10 docs
-                    if hasattr(doc, 'vector') and doc.vector is not None:
-                        try:
-                            if isinstance(doc.vector, list):
-                                size = len(doc.vector)
-                            elif hasattr(doc.vector, 'shape'):
-                                size = doc.vector.shape[0] if len(doc.vector.shape) == 1 else doc.vector.shape[-1]
-                            elif hasattr(doc.vector, '__len__'):
-                                size = len(doc.vector)
-                            else:
-                                size = "unknown"
-                            sizes.append(f"doc_{i}: {size}")
-                        except:
-                            sizes.append(f"doc_{i}: error")
-                logger.error(f"Sample embedding sizes: {', '.join(sizes)}")
-            raise
-
-    def call(self, query: str, language: str = "en") -> Tuple[List]:
+    def call(self, query: str, language: str = "en") -> Tuple[RAGAnswer, List]:
         """
         Process a query using RAG.
 
         Args:
             query: The user's query
+            language: Language for the response (default: "en")
 
         Returns:
             Tuple of (RAGAnswer, retrieved_documents)
         """
         try:
-            retrieved_documents = self.retriever(query)
+            if self.retriever is None:
+                raise ValueError("Retriever not initialized. Call prepare_retriever first.")
 
-            # Fill in the documents
-            retrieved_documents[0].documents = [
-                self.transformed_docs[doc_index]
-                for doc_index in retrieved_documents[0].doc_indices
-            ]
+            # Retrieve relevant documents
+            retrieved_docs = self.retriever.retrieve(query)
+            logger.info(f"Retrieved {len(retrieved_docs)} documents")
 
-            return retrieved_documents
+            # Format context from retrieved documents
+            context_parts = []
+            for i, doc in enumerate(retrieved_docs):
+                text = doc.get('text', '')
+                file_path = doc.get('metadata', {}).get('file_path', 'unknown')
+                context_parts.append(f"[Document {i+1}] {file_path}:\n{text}")
+
+            context = "\n\n".join(context_parts)
+
+            # Format conversation history
+            conv_history = self.memory()
+            history_str = ""
+            if conv_history:
+                history_parts = []
+                for turn_id, turn in conv_history.items():
+                    user_q = turn.user_query.query_str
+                    assistant_a = turn.assistant_response.response_str
+                    history_parts.append(f"User: {user_q}\nAssistant: {assistant_a}")
+                history_str = "\n\n".join(history_parts)
+
+            # Generate answer using DSPy
+            prediction = self.generate_answer(
+                system_prompt=system_prompt,
+                context=context,
+                conversation_history=history_str,
+                question=query
+            )
+
+            # Create RAGAnswer object
+            rag_answer = RAGAnswer(
+                rationale=prediction.rationale,
+                answer=prediction.answer
+            )
+
+            # Add to memory
+            self.memory.add_dialog_turn(query, prediction.answer)
+
+            return rag_answer, retrieved_docs
 
         except Exception as e:
             logger.error(f"Error in RAG call: {str(e)}")
@@ -440,6 +372,6 @@ IMPORTANT FORMATTING RULES:
             # Create error response
             error_response = RAGAnswer(
                 rationale="Error occurred while processing the query.",
-                answer=f"I apologize, but I encountered an error while processing your question. Please try again or rephrase your question."
+                answer="I apologize, but I encountered an error while processing your question. Please try again or rephrase your question."
             )
             return error_response, []

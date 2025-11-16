@@ -7,13 +7,8 @@ from typing import List, Union, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-from api.openai_client import OpenAIClient
-from api.openrouter_client import OpenRouterClient
-from api.bedrock_client import BedrockClient
-from api.google_embedder_client import GoogleEmbedderClient
-from api.azureai_client import AzureAIClient
-from api.dashscope_client import DashscopeClient
-from adalflow import GoogleGenAIClient, OllamaClient
+# Model clients are now handled by DSPy via LiteLLM
+# No need for custom client imports
 
 # Get API keys from environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
@@ -50,18 +45,6 @@ EMBEDDER_TYPE = os.environ.get('DEEPWIKI_EMBEDDER_TYPE', 'openai').lower()
 
 # Get configuration directory from environment variable, or use default if not set
 CONFIG_DIR = os.environ.get('DEEPWIKI_CONFIG_DIR', None)
-
-# Client class mapping
-CLIENT_CLASSES = {
-    "GoogleGenAIClient": GoogleGenAIClient,
-    "GoogleEmbedderClient": GoogleEmbedderClient,
-    "OpenAIClient": OpenAIClient,
-    "OpenRouterClient": OpenRouterClient,
-    "OllamaClient": OllamaClient,
-    "BedrockClient": BedrockClient,
-    "AzureAIClient": AzureAIClient,
-    "DashscopeClient": DashscopeClient
-}
 
 def replace_env_placeholders(config: Union[Dict[str, Any], List[Any], str, Any]) -> Union[Dict[str, Any], List[Any], str, Any]:
     """
@@ -120,41 +103,13 @@ def load_json_config(filename):
 # Load generator model configuration
 def load_generator_config():
     generator_config = load_json_config("generator.json")
-
-    # Add client classes to each provider
-    if "providers" in generator_config:
-        for provider_id, provider_config in generator_config["providers"].items():
-            # Try to set client class from client_class
-            if provider_config.get("client_class") in CLIENT_CLASSES:
-                provider_config["model_client"] = CLIENT_CLASSES[provider_config["client_class"]]
-            # Fall back to default mapping based on provider_id
-            elif provider_id in ["google", "openai", "openrouter", "ollama", "bedrock", "azure", "dashscope"]:
-                default_map = {
-                    "google": GoogleGenAIClient,
-                    "openai": OpenAIClient,
-                    "openrouter": OpenRouterClient,
-                    "ollama": OllamaClient,
-                    "bedrock": BedrockClient,
-                    "azure": AzureAIClient,
-                    "dashscope": DashscopeClient
-                }
-                provider_config["model_client"] = default_map[provider_id]
-            else:
-                logger.warning(f"Unknown provider or client class: {provider_id}")
-
+    # No need to resolve client classes - DSPy handles all providers via LiteLLM
     return generator_config
 
 # Load embedder configuration
 def load_embedder_config():
     embedder_config = load_json_config("embedder.json")
-
-    # Process client classes
-    for key in ["embedder", "embedder_ollama", "embedder_google"]:
-        if key in embedder_config and "client_class" in embedder_config[key]:
-            class_name = embedder_config[key]["client_class"]
-            if class_name in CLIENT_CLASSES:
-                embedder_config[key]["model_client"] = CLIENT_CLASSES[class_name]
-
+    # No need to resolve client classes - DSPy handles embedders
     return embedder_config
 
 def get_embedder_config():
@@ -162,7 +117,7 @@ def get_embedder_config():
     Get the current embedder configuration based on DEEPWIKI_EMBEDDER_TYPE.
 
     Returns:
-        dict: The embedder configuration with model_client resolved
+        dict: The embedder configuration
     """
     embedder_type = EMBEDDER_TYPE
     if embedder_type == 'google' and 'embedder_google' in configs:
@@ -174,57 +129,30 @@ def get_embedder_config():
 
 def is_ollama_embedder():
     """
-    Check if the current embedder configuration uses OllamaClient.
+    Check if the current embedder type is Ollama.
 
     Returns:
-        bool: True if using OllamaClient, False otherwise
+        bool: True if using Ollama, False otherwise
     """
-    embedder_config = get_embedder_config()
-    if not embedder_config:
-        return False
-
-    # Check if model_client is OllamaClient
-    model_client = embedder_config.get("model_client")
-    if model_client:
-        return model_client.__name__ == "OllamaClient"
-
-    # Fallback: check client_class string
-    client_class = embedder_config.get("client_class", "")
-    return client_class == "OllamaClient"
+    return EMBEDDER_TYPE == 'ollama'
 
 def is_google_embedder():
     """
-    Check if the current embedder configuration uses GoogleEmbedderClient.
+    Check if the current embedder type is Google.
 
     Returns:
-        bool: True if using GoogleEmbedderClient, False otherwise
+        bool: True if using Google, False otherwise
     """
-    embedder_config = get_embedder_config()
-    if not embedder_config:
-        return False
-
-    # Check if model_client is GoogleEmbedderClient
-    model_client = embedder_config.get("model_client")
-    if model_client:
-        return model_client.__name__ == "GoogleEmbedderClient"
-
-    # Fallback: check client_class string
-    client_class = embedder_config.get("client_class", "")
-    return client_class == "GoogleEmbedderClient"
+    return EMBEDDER_TYPE == 'google'
 
 def get_embedder_type():
     """
     Get the current embedder type based on configuration.
-    
+
     Returns:
         str: 'ollama', 'google', or 'openai' (default)
     """
-    if is_ollama_embedder():
-        return 'ollama'
-    elif is_google_embedder():
-        return 'google'
-    else:
-        return 'openai'
+    return EMBEDDER_TYPE
 
 # Load repository and file filters configuration
 def load_repo_config():
@@ -333,14 +261,14 @@ if lang_config:
 
 def get_model_config(provider="google", model=None):
     """
-    Get configuration for the specified provider and model
+    Get configuration for the specified provider and model.
 
     Parameters:
-        provider (str): Model provider ('google', 'openai', 'openrouter', 'ollama', 'bedrock')
+        provider (str): Model provider ('google', 'openai', 'openrouter', 'ollama', 'bedrock', 'azure')
         model (str): Model name, or None to use default model
 
     Returns:
-        dict: Configuration containing model_client, model and other parameters
+        dict: Configuration containing model and parameters (for DSPy LM usage)
     """
     # Get provider configuration
     if "providers" not in configs:
@@ -349,10 +277,6 @@ def get_model_config(provider="google", model=None):
     provider_config = configs["providers"].get(provider)
     if not provider_config:
         raise ValueError(f"Configuration for provider '{provider}' not found")
-
-    model_client = provider_config.get("model_client")
-    if not model_client:
-        raise ValueError(f"Model client not specified for provider '{provider}'")
 
     # If model not provided, use default model for the provider
     if not model:
@@ -366,12 +290,11 @@ def get_model_config(provider="google", model=None):
         model_params = provider_config["models"][model]
     else:
         default_model = provider_config.get("default_model")
-        model_params = provider_config["models"][default_model]
+        if default_model and default_model in provider_config.get("models", {}):
+            model_params = provider_config["models"][default_model]
 
-    # Prepare base configuration
-    result = {
-        "model_client": model_client,
-    }
+    # Prepare configuration for DSPy
+    result = {}
 
     # Provider-specific adjustments
     if provider == "ollama":
